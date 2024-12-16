@@ -7,31 +7,30 @@
 #include <DebugOutput.h>
 
 #if D3D11_SUPPORTED
-#    include "EngineFactoryD3D11.h"
+#include "EngineFactoryD3D11.h"
 #endif
 
 #if D3D12_SUPPORTED
-#    include "EngineFactoryD3D12.h"
+#include "EngineFactoryD3D12.h"
 #endif
 
 #if GL_SUPPORTED
-#    include "EngineFactoryOpenGL.h"
+#include "EngineFactoryOpenGL.h"
 #endif
 
 #if VULKAN_SUPPORTED
-#    include "EngineFactoryVk.h"
+#include "EngineFactoryVk.h"
 #endif
 
-#include "RenderDevice.h"
 #include "DeviceContext.h"
-#include "SwapChain.h"
-
-#include "RefCntAutoPtr.hpp"
-#include "OpenXRUtilities.h"
-#include "GraphicsUtilities.h"
 #include "GraphicsAccessories.hpp"
 #include "GraphicsTypesX.hpp"
+#include "GraphicsUtilities.h"
 #include "MapHelper.hpp"
+#include "OpenXRUtilities.h"
+#include "RefCntAutoPtr.hpp"
+#include "RenderDevice.h"
+#include "SwapChain.h"
 
 // XR_DOCS_TAG_BEGIN_include_OpenXRDebugUtils
 #include <OpenXRDebugUtils.h>
@@ -53,30 +52,48 @@ XrVector3f operator*(XrVector3f a, float b) {
 
 #define XR_DOCS_CHAPTER_VERSION XR_DOCS_CHAPTER_3_3
 
-
-const char* GetGraphicsAPIInstanceExtensionString(Diligent::RENDER_DEVICE_TYPE Type)
-{
-    switch (Type)
-    {
+const char *GetGraphicsAPIInstanceExtensionString(Diligent::RENDER_DEVICE_TYPE Type) {
+    switch (Type) {
 #if D3D11_SUPPORTED
-        case Diligent::RENDER_DEVICE_TYPE_D3D11: return "XR_KHR_D3D11_enable";
+    case Diligent::RENDER_DEVICE_TYPE_D3D11:
+        return "XR_KHR_D3D11_enable";
 #endif
 
 #if D3D12_SUPPORTED
-        case Diligent::RENDER_DEVICE_TYPE_D3D12: return "XR_KHR_D3D12_enable";
+    case Diligent::RENDER_DEVICE_TYPE_D3D12:
+        return "XR_KHR_D3D12_enable";
 #endif
 
 #if GL_SUPPORTED
-        case Diligent::RENDER_DEVICE_TYPE_GL: return "XR_KHR_opengl_enable";
+    case Diligent::RENDER_DEVICE_TYPE_GL:
+        return "XR_KHR_opengl_enable";
 #endif
 
 #if VULKAN_SUPPORTED
-        case Diligent::RENDER_DEVICE_TYPE_VULKAN: return "XR_KHR_vulkan_enable2";
+    case Diligent::RENDER_DEVICE_TYPE_VULKAN:
+        return "XR_KHR_vulkan_enable2";
 #endif
 
-        default:
-            UNEXPECTED("Unknown device type");
-            return nullptr;
+    default:
+        UNEXPECTED("Unknown device type");
+        return nullptr;
+    }
+}
+
+inline GraphicsAPI_Type DiligentDeviceTypeToGraphicsAPIType(Diligent::RENDER_DEVICE_TYPE deviceType) {
+    switch (deviceType) {
+    case Diligent::RENDER_DEVICE_TYPE_D3D11:
+        return GraphicsAPI_Type::D3D11;
+    case Diligent::RENDER_DEVICE_TYPE_D3D12:
+        return GraphicsAPI_Type::D3D12;
+    case Diligent::RENDER_DEVICE_TYPE_GL:
+        return GraphicsAPI_Type::OPENGL;
+    case Diligent::RENDER_DEVICE_TYPE_GLES:
+        return GraphicsAPI_Type::OPENGL_ES;
+    case Diligent::RENDER_DEVICE_TYPE_VULKAN:
+        return GraphicsAPI_Type::VULKAN;
+    default:
+        return GraphicsAPI_Type::UNKNOWN;
     }
 }
 
@@ -88,7 +105,7 @@ public:
     OpenXRTutorial(Diligent::RENDER_DEVICE_TYPE apiType)
         : m_apiType(apiType) {
         // Check API compatibility with Platform.
-        //if (!CheckGraphicsAPI_TypeIsValidForPlatform(m_apiType)) {
+        // if (!CheckGraphicsAPI_TypeIsValidForPlatform(m_apiType)) {
         //    XR_TUT_LOG_ERROR("ERROR: The provided Graphics API is not valid for this platform.");
         //    DEBUG_BREAK;
         //}
@@ -272,9 +289,9 @@ private:
         OPENXR_CHECK(xrGetInstanceProperties(m_xrInstance, &instanceProperties), "Failed to get InstanceProperties.");
 
         XR_TUT_LOG("OpenXR Runtime: " << instanceProperties.runtimeName << " - "
-                                    << XR_VERSION_MAJOR(instanceProperties.runtimeVersion) << "."
-                                    << XR_VERSION_MINOR(instanceProperties.runtimeVersion) << "."
-                                    << XR_VERSION_PATCH(instanceProperties.runtimeVersion));
+                                      << XR_VERSION_MAJOR(instanceProperties.runtimeVersion) << "."
+                                      << XR_VERSION_MINOR(instanceProperties.runtimeVersion) << "."
+                                      << XR_VERSION_PATCH(instanceProperties.runtimeVersion));
         // XR_DOCS_TAG_END_GetInstanceProperties
     }
 
@@ -340,8 +357,7 @@ private:
         // XR_DOCS_TAG_END_GetViewConfigurationViews
     }
 
-    void InitializeGraphics()
-    {
+    void InitializeGraphics() {
         Diligent::OpenXRAttribs xrAttribs;
         static_assert(sizeof(xrAttribs.Instance) == sizeof(m_xrInstance), "XrInstance size mismatch");
         memcpy(&xrAttribs.Instance, &m_xrInstance, sizeof(m_xrInstance));
@@ -350,49 +366,41 @@ private:
         xrAttribs.GetInstanceProcAddr = xrGetInstanceProcAddr;
 
         Diligent::RefCntAutoPtr<Diligent::IRenderDevice> renderDevice;
-        switch (m_apiType)
-        {
+        switch (m_apiType) {
 #if D3D11_SUPPORTED
-            case Diligent::RENDER_DEVICE_TYPE_D3D11:
-            {
-                Diligent::EngineD3D11CreateInfo engineCI;
-                engineCI.pXRAttribs = &xrAttribs;
-#    if ENGINE_DLL
-                // Load the dll and import GetEngineFactoryD3D11() function
-                auto* GetEngineFactoryD3D11 = LoadGraphicsEngineD3D11();
-#    endif
-                auto* factoryD3D11 = Diligent::GetEngineFactoryD3D11();
-                factoryD3D11->CreateDeviceAndContextsD3D11(engineCI, &renderDevice, &m_context);
-            }
-            break;
+        case Diligent::RENDER_DEVICE_TYPE_D3D11: {
+            Diligent::EngineD3D11CreateInfo engineCI;
+            engineCI.pXRAttribs = &xrAttribs;
+#if ENGINE_DLL
+            // Load the dll and import GetEngineFactoryD3D11() function
+            auto *GetEngineFactoryD3D11 = LoadGraphicsEngineD3D11();
 #endif
-
+            auto *factoryD3D11 = Diligent::GetEngineFactoryD3D11();
+            factoryD3D11->CreateDeviceAndContextsD3D11(engineCI, &renderDevice, &m_context);
+        } break;
+#endif
 
 #if D3D12_SUPPORTED
-            case Diligent::RENDER_DEVICE_TYPE_D3D12:
-            {
-#    if ENGINE_DLL
-                // Load the dll and import GetEngineFactoryD3D12() function
-                auto GetEngineFactoryD3D12 = LoadGraphicsEngineD3D12();
-#    endif
-                Diligent::EngineD3D12CreateInfo engineCI;
-                engineCI.pXRAttribs = &xrAttribs;
+        case Diligent::RENDER_DEVICE_TYPE_D3D12: {
+#if ENGINE_DLL
+            // Load the dll and import GetEngineFactoryD3D12() function
+            auto GetEngineFactoryD3D12 = LoadGraphicsEngineD3D12();
+#endif
+            Diligent::EngineD3D12CreateInfo engineCI;
+            engineCI.pXRAttribs = &xrAttribs;
 
-                auto* factoryD3D12 = Diligent::GetEngineFactoryD3D12();
-                factoryD3D12->CreateDeviceAndContextsD3D12(engineCI, &renderDevice, &m_context);
-            }
-            break;
+            auto *factoryD3D12 = Diligent::GetEngineFactoryD3D12();
+            factoryD3D12->CreateDeviceAndContextsD3D12(engineCI, &renderDevice, &m_context);
+        } break;
 #endif
 
-
 #if GL_SUPPORTED
-            case Diligent::RENDER_DEVICE_TYPE_GL:
-            {
-#    if 0
-#        if EXPLICITLY_LOAD_ENGINE_GL_DLL
+        case Diligent::RENDER_DEVICE_TYPE_GL: {
+#if 0
+#if EXPLICITLY_LOAD_ENGINE_GL_DLL
                 // Load the dll and import GetEngineFactoryOpenGL() function
                 auto GetEngineFactoryOpenGL = LoadGraphicsEngineOpenGL();
-#        endif
+#endif
                 auto* factoryOpenGL = GetEngineFactoryOpenGL();
 
                 Diligent::EngineGLCreateInfo engineCI;
@@ -400,32 +408,28 @@ private:
                 engineCI.Window.hWnd = hWnd;
 
                 factoryOpenGL->CreateDeviceAndSwapChainGL(EngineCI, &renderDevice, &m_context, scDesc, &m_swapChain);
-#    endif
-            }
-            break;
 #endif
-
+        } break;
+#endif
 
 #if VULKAN_SUPPORTED
-            case Diligent::RENDER_DEVICE_TYPE_VULKAN:
-            {
-#    if EXPLICITLY_LOAD_ENGINE_VK_DLL
-                // Load the dll and import GetEngineFactoryVk() function
-                auto GetEngineFactoryVk = LoadGraphicsEngineVk();
-#    endif
-                Diligent::EngineVkCreateInfo engineCI;
-                engineCI.pXRAttribs = &xrAttribs;
+        case Diligent::RENDER_DEVICE_TYPE_VULKAN: {
+#if EXPLICITLY_LOAD_ENGINE_VK_DLL
+            // Load the dll and import GetEngineFactoryVk() function
+            auto GetEngineFactoryVk = LoadGraphicsEngineVk();
+#endif
+            Diligent::EngineVkCreateInfo engineCI;
+            engineCI.pXRAttribs = &xrAttribs;
 
-                auto* factoryVk = Diligent::GetEngineFactoryVk();
-                factoryVk->CreateDeviceAndContextsVk(engineCI, &renderDevice, &m_context);
-            }
-            break;
+            auto *factoryVk = Diligent::GetEngineFactoryVk();
+            factoryVk->CreateDeviceAndContextsVk(engineCI, &renderDevice, &m_context);
+        } break;
 #endif
 
-            default:
-                XR_TUT_LOG_ERROR("Unknown/unsupported device type");
-                DEBUG_BREAK;
-                break;
+        default:
+            XR_TUT_LOG_ERROR("Unknown/unsupported device type");
+            DEBUG_BREAK;
+            break;
         }
 
         m_renderDevice = renderDevice;
@@ -478,7 +482,6 @@ private:
     // XR_DOCS_TAG_END_CreateResources1
 
     void CreateResources() {
-#if 0
         // XR_DOCS_TAG_BEGIN_CreateResources1_1
         // Vertices for a 1x1x1 meter cube. (Left/Right, Top/Bottom, Front/Back)
         constexpr XrVector4f vertexPositions[] = {
@@ -511,99 +514,84 @@ private:
             30, 31, 32, 33, 34, 35,  // +Z
         };
 
-        m_vertexBuffer = m_graphicsAPI->CreateBuffer({GraphicsAPI::BufferCreateInfo::Type::VERTEX, sizeof(float) * 4, sizeof(cubeVertices), &cubeVertices});
+        m_vertexBuffer = m_renderDevice.CreateBuffer("Vertices", sizeof(cubeVertices), Diligent::USAGE_DEFAULT, Diligent::BIND_VERTEX_BUFFER, Diligent::CPU_ACCESS_NONE, cubeVertices);
+        m_indexBuffer = m_renderDevice.CreateBuffer("Indices", sizeof(cubeIndices), Diligent::USAGE_DEFAULT, Diligent::BIND_INDEX_BUFFER, Diligent::CPU_ACCESS_NONE, cubeIndices);
+        m_uniformBuffer_Normals = m_renderDevice.CreateBuffer("Normals", sizeof(normals), Diligent::USAGE_DEFAULT, Diligent::BIND_UNIFORM_BUFFER, Diligent::CPU_ACCESS_NONE, &normals);
+        m_uniformBuffer_Camera = m_renderDevice.CreateBuffer("Camera Constants", sizeof(CameraConstants), Diligent::USAGE_DYNAMIC, Diligent::BIND_UNIFORM_BUFFER);
 
-        m_indexBuffer = m_graphicsAPI->CreateBuffer({GraphicsAPI::BufferCreateInfo::Type::INDEX, sizeof(uint32_t), sizeof(cubeIndices), &cubeIndices});
+        Diligent::GraphicsPipelineStateCreateInfoX psoCreateInfo{"Cuboid"};
+        psoCreateInfo
+            .AddRenderTarget(m_colorFormat)
+            .SetDepthFormat(m_depthFormat)
+            .SetPrimitiveTopology(Diligent::PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 
-        size_t numberOfCuboids = 2;
-        m_uniformBuffer_Camera = m_graphicsAPI->CreateBuffer({GraphicsAPI::BufferCreateInfo::Type::UNIFORM, 0, sizeof(CameraConstants) * numberOfCuboids, nullptr});
-        m_uniformBuffer_Normals = m_graphicsAPI->CreateBuffer({GraphicsAPI::BufferCreateInfo::Type::UNIFORM, 0, sizeof(normals), &normals});
-        // XR_DOCS_TAG_END_CreateResources1_1
+        psoCreateInfo.GraphicsPipeline.RasterizerDesc.CullMode = Diligent::CULL_MODE_BACK;
+        psoCreateInfo.GraphicsPipeline.RasterizerDesc.FrontCounterClockwise = true;
+        psoCreateInfo.GraphicsPipeline.DepthStencilDesc.DepthEnable = true;
 
-        // XR_DOCS_TAG_BEGIN_CreateResources2_OpenGL
-        if (m_apiType == OPENGL) {
-            std::string vertexSource = ReadTextFile("VertexShader.glsl");
-            m_vertexShader = m_graphicsAPI->CreateShader({GraphicsAPI::ShaderCreateInfo::Type::VERTEX, vertexSource.data(), vertexSource.size()});
+        Diligent::ShaderCreateInfo shaderCI;
+        shaderCI.SourceLanguage = Diligent::SHADER_SOURCE_LANGUAGE_HLSL;
 
-            std::string fragmentSource = ReadTextFile("PixelShader.glsl");
-            m_fragmentShader = m_graphicsAPI->CreateShader({GraphicsAPI::ShaderCreateInfo::Type::FRAGMENT, fragmentSource.data(), fragmentSource.size()});
+        Diligent::RefCntAutoPtr<Diligent::IShaderSourceInputStreamFactory> shaderSourceFactory;
+        m_renderDevice.GetEngineFactory()->CreateDefaultShaderSourceStreamFactory("../Shaders", &shaderSourceFactory);
+        shaderCI.pShaderSourceStreamFactory = shaderSourceFactory;
+
+        // OpenGL backend requires emulated combined HLSL texture samplers (g_Texture + g_Texture_sampler combination)
+        constexpr bool UseCombinedTextureSamplers = true;
+
+        Diligent::RefCntAutoPtr<Diligent::IShader> vs;
+        {
+            shaderCI.Desc = {"VS", Diligent::SHADER_TYPE_VERTEX, UseCombinedTextureSamplers};
+            shaderCI.EntryPoint = "main";
+            shaderCI.FilePath = "VertexShader.hlsl";
+
+            vs = m_renderDevice.CreateShader(shaderCI);
+            VERIFY_EXPR(vs);
         }
-        // XR_DOCS_TAG_END_CreateResources2_OpenGL
-        // XR_DOCS_TAG_BEGIN_CreateResources2_VulkanWindowsLinux
-        if (m_apiType == VULKAN) {
-            std::vector<char> vertexSource = ReadBinaryFile("VertexShader.spv");
-            m_vertexShader = m_graphicsAPI->CreateShader({GraphicsAPI::ShaderCreateInfo::Type::VERTEX, vertexSource.data(), vertexSource.size()});
 
-            std::vector<char> fragmentSource = ReadBinaryFile("PixelShader.spv");
-            m_fragmentShader = m_graphicsAPI->CreateShader({GraphicsAPI::ShaderCreateInfo::Type::FRAGMENT, fragmentSource.data(), fragmentSource.size()});
-        }
-        // XR_DOCS_TAG_END_CreateResources2_VulkanWindowsLinux
-#if defined(__ANDROID__)
-        // XR_DOCS_TAG_BEGIN_CreateResources2_VulkanAndroid
-        if (m_apiType == VULKAN) {
-            std::vector<char> vertexSource = ReadBinaryFile("shaders/VertexShader.spv", androidApp->activity->assetManager);
-            m_vertexShader = m_graphicsAPI->CreateShader({GraphicsAPI::ShaderCreateInfo::Type::VERTEX, vertexSource.data(), vertexSource.size()});
-            std::vector<char> fragmentSource = ReadBinaryFile("shaders/PixelShader.spv", androidApp->activity->assetManager);
-            m_fragmentShader = m_graphicsAPI->CreateShader({GraphicsAPI::ShaderCreateInfo::Type::FRAGMENT, fragmentSource.data(), fragmentSource.size()});
-        }
-        // XR_DOCS_TAG_END_CreateResources2_VulkanAndroid
-        // XR_DOCS_TAG_BEGIN_CreateResources2_OpenGLES
-        if (m_apiType == OPENGL_ES) {
-            std::string vertexSource = ReadTextFile("shaders/VertexShader_GLES.glsl", androidApp->activity->assetManager);
-            m_vertexShader = m_graphicsAPI->CreateShader({GraphicsAPI::ShaderCreateInfo::Type::VERTEX, vertexSource.data(), vertexSource.size()});
-            std::string fragmentSource = ReadTextFile("shaders/PixelShader_GLES.glsl", androidApp->activity->assetManager);
-            m_fragmentShader = m_graphicsAPI->CreateShader({GraphicsAPI::ShaderCreateInfo::Type::FRAGMENT, fragmentSource.data(), fragmentSource.size()});
-        }
-        // XR_DOCS_TAG_END_CreateResources2_OpenGLES
-#endif
-        // XR_DOCS_TAG_BEGIN_CreateResources2_D3D
-        if (m_apiType == D3D11) {
-            std::vector<char> vertexSource = ReadBinaryFile("VertexShader_5_0.cso");
-            m_vertexShader = m_graphicsAPI->CreateShader({GraphicsAPI::ShaderCreateInfo::Type::VERTEX, vertexSource.data(), vertexSource.size()});
+        Diligent::RefCntAutoPtr<Diligent::IShader> ps;
+        {
+            shaderCI.Desc = {"PS", Diligent::SHADER_TYPE_PIXEL, UseCombinedTextureSamplers};
+            shaderCI.EntryPoint = "main";
+            shaderCI.FilePath = "PixelShader.hlsl";
 
-            std::vector<char> fragmentSource = ReadBinaryFile("PixelShader_5_0.cso");
-            m_fragmentShader = m_graphicsAPI->CreateShader({GraphicsAPI::ShaderCreateInfo::Type::FRAGMENT, fragmentSource.data(), fragmentSource.size()});
+            ps = m_renderDevice.CreateShader(shaderCI);
+            VERIFY_EXPR(ps);
         }
-        if (m_apiType == D3D12) {
-            std::vector<char> vertexSource = ReadBinaryFile("VertexShader_5_1.cso");
-            m_vertexShader = m_graphicsAPI->CreateShader({GraphicsAPI::ShaderCreateInfo::Type::VERTEX, vertexSource.data(), vertexSource.size()});
 
-            std::vector<char> fragmentSource = ReadBinaryFile("PixelShader_5_1.cso");
-            m_fragmentShader = m_graphicsAPI->CreateShader({GraphicsAPI::ShaderCreateInfo::Type::FRAGMENT, fragmentSource.data(), fragmentSource.size()});
-        }
-        // XR_DOCS_TAG_END_CreateResources2_D3D
+        Diligent::InputLayoutDescX inputLayout{
+            // Attribute 0 - vertex position
+            Diligent::LayoutElement{0, 0, 4, Diligent::VT_FLOAT32},
+        };
 
-        // XR_DOCS_TAG_BEGIN_CreateResources3
-        GraphicsAPI::PipelineCreateInfo pipelineCI;
-        pipelineCI.shaders = {m_vertexShader, m_fragmentShader};
-        pipelineCI.vertexInputState.attributes = {{0, 0, GraphicsAPI::VertexType::VEC4, 0, "TEXCOORD"}};
-        pipelineCI.vertexInputState.bindings = {{0, 0, 4 * sizeof(float)}};
-        pipelineCI.inputAssemblyState = {GraphicsAPI::PrimitiveTopology::TRIANGLE_LIST, false};
-        pipelineCI.rasterisationState = {false, false, GraphicsAPI::PolygonMode::FILL, GraphicsAPI::CullMode::BACK, GraphicsAPI::FrontFace::COUNTER_CLOCKWISE, false, 0.0f, 0.0f, 0.0f, 1.0f};
-        pipelineCI.multisampleState = {1, false, 1.0f, 0xFFFFFFFF, false, false};
-        pipelineCI.depthStencilState = {true, true, GraphicsAPI::CompareOp::LESS_OR_EQUAL, false, false, {}, {}, 0.0f, 1.0f};
-        pipelineCI.colorBlendState = {false, GraphicsAPI::LogicOp::NO_OP, {{true, GraphicsAPI::BlendFactor::SRC_ALPHA, GraphicsAPI::BlendFactor::ONE_MINUS_SRC_ALPHA, GraphicsAPI::BlendOp::ADD, GraphicsAPI::BlendFactor::ONE, GraphicsAPI::BlendFactor::ZERO, GraphicsAPI::BlendOp::ADD, (GraphicsAPI::ColorComponentBit)15}}, {0.0f, 0.0f, 0.0f, 0.0f}};
-        pipelineCI.colorFormats = {m_colorSwapchainInfos[0].swapchainFormat};
-        pipelineCI.depthFormat = m_depthSwapchainInfos[0].swapchainFormat;
-        pipelineCI.layout = {{0, nullptr, GraphicsAPI::DescriptorInfo::Type::BUFFER, GraphicsAPI::DescriptorInfo::Stage::VERTEX},
-                             {1, nullptr, GraphicsAPI::DescriptorInfo::Type::BUFFER, GraphicsAPI::DescriptorInfo::Stage::VERTEX},
-                             {2, nullptr, GraphicsAPI::DescriptorInfo::Type::BUFFER, GraphicsAPI::DescriptorInfo::Stage::FRAGMENT}};
-        m_pipeline = m_graphicsAPI->CreatePipeline(pipelineCI);
-        // XR_DOCS_TAG_END_CreateResources3
-#endif
+        psoCreateInfo
+            .AddShader(vs)
+            .AddShader(ps)
+            .SetInputLayout(inputLayout);
+
+        // Static variables are set once in the pipeline state (like immutable samplers)
+        // Mutable variables are set once in each instance of the SRB
+        // Dynamic variables can be set multiple times in each instance of the SRB
+        psoCreateInfo.PSODesc.ResourceLayout.DefaultVariableType = Diligent::SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE;
+        // Merge resources with the same name in all stages
+        psoCreateInfo.PSODesc.ResourceLayout.DefaultVariableMergeStages = Diligent::SHADER_TYPE_VS_PS;
+
+        m_pipeline = m_renderDevice.CreateGraphicsPipelineState(psoCreateInfo);
+        m_pipeline->CreateShaderResourceBinding(&m_srb, true);
+
+        m_srb->GetVariableByName(Diligent::SHADER_TYPE_VERTEX, "Normals")->Set(m_uniformBuffer_Normals);
+        m_srb->GetVariableByName(Diligent::SHADER_TYPE_VERTEX, "CameraConstants")->Set(m_uniformBuffer_Camera);
     }
+
     void DestroyResources() {
-#if 0
         // XR_DOCS_TAG_BEGIN_DestroyResources
-        m_graphicsAPI->DestroyPipeline(m_pipeline);
-        m_graphicsAPI->DestroyShader(m_fragmentShader);
-        m_graphicsAPI->DestroyShader(m_vertexShader);
-        m_graphicsAPI->DestroyBuffer(m_uniformBuffer_Camera);
-        m_graphicsAPI->DestroyBuffer(m_uniformBuffer_Normals);
-        m_graphicsAPI->DestroyBuffer(m_indexBuffer);
-        m_graphicsAPI->DestroyBuffer(m_vertexBuffer);
+        m_pipeline.Release();
+        m_srb.Release();
+        m_uniformBuffer_Camera.Release();
+        m_uniformBuffer_Normals.Release();
+        m_indexBuffer.Release();
+        m_vertexBuffer.Release();
         // XR_DOCS_TAG_END_DestroyResources
-#endif
     }
 
     void PollEvents() {
@@ -646,7 +634,7 @@ private:
                 XrEventDataReferenceSpaceChangePending *referenceSpaceChangePending = reinterpret_cast<XrEventDataReferenceSpaceChangePending *>(&eventData);
                 XR_TUT_LOG("OPENXR: Reference Space Change pending for Session: " << referenceSpaceChangePending->session);
                 if (referenceSpaceChangePending->session != m_session) {
-                   XR_TUT_LOG("XrEventDataReferenceSpaceChangePending for unknown Session");
+                    XR_TUT_LOG("XrEventDataReferenceSpaceChangePending for unknown Session");
                     break;
                 }
                 break;
@@ -721,23 +709,17 @@ private:
 
         int64_t nativeColorFormat = 0;
         int64_t nativeDepthFormat = 0;
-        for (int64_t nativeFormat : formats)
-        {
-            const Diligent::TEXTURE_FORMAT        format     = Diligent::GetTextureFormatFromNative(nativeFormat, m_apiType);
-            const Diligent::TextureFormatAttribs& fmtAttribs = Diligent::GetTextureFormatAttribs(format);
-            if (fmtAttribs.IsDepthStencil())
-            {
-                if (nativeDepthFormat == 0)
-                {
-                    m_depthFormat     = format;
+        for (int64_t nativeFormat : formats) {
+            const Diligent::TEXTURE_FORMAT format = Diligent::GetTextureFormatFromNative(nativeFormat, m_apiType);
+            const Diligent::TextureFormatAttribs &fmtAttribs = Diligent::GetTextureFormatAttribs(format);
+            if (fmtAttribs.IsDepthStencil()) {
+                if (nativeDepthFormat == 0) {
+                    m_depthFormat = format;
                     nativeDepthFormat = nativeFormat;
                 }
-            }
-            else
-            {
-                if (nativeColorFormat == 0)
-                {
-                    m_colorFormat     = format;
+            } else {
+                if (nativeColorFormat == 0) {
+                    m_colorFormat = format;
                     nativeColorFormat = nativeFormat;
                 }
             }
@@ -746,13 +728,11 @@ private:
                 break;
         }
 
-        if (nativeColorFormat == 0)
-        {
+        if (nativeColorFormat == 0) {
             std::cerr << "Failed to find a compatible color format for Swapchain";
             DEBUG_BREAK;
         }
-        if (nativeDepthFormat == 0)
-        {
+        if (nativeDepthFormat == 0) {
             std::cerr << "Failed to find a compatible depth format for Swapchain";
             DEBUG_BREAK;
         }
@@ -760,7 +740,7 @@ private:
         // XR_DOCS_TAG_END_EnumerateSwapchainFormats
 
         // XR_DOCS_TAG_BEGIN_ResizeSwapchainInfos
-        //Resize the SwapchainInfo to match the number of view in the View Configuration.
+        // Resize the SwapchainInfo to match the number of view in the View Configuration.
         m_colorSwapchainInfos.resize(m_viewConfigurationViews.size());
         m_depthSwapchainInfos.resize(m_viewConfigurationViews.size());
         // XR_DOCS_TAG_END_ResizeSwapchainInfos
@@ -776,7 +756,7 @@ private:
             XrSwapchainCreateInfo swapchainCI{XR_TYPE_SWAPCHAIN_CREATE_INFO};
             swapchainCI.createFlags = 0;
             swapchainCI.usageFlags = XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
-            swapchainCI.format = nativeColorFormat;                
+            swapchainCI.format = nativeColorFormat;
             swapchainCI.sampleCount = m_viewConfigurationViews[i].recommendedSwapchainSampleCount;  // Use the recommended values from the XrViewConfigurationView.
             swapchainCI.width = m_viewConfigurationViews[i].recommendedImageRectWidth;
             swapchainCI.height = m_viewConfigurationViews[i].recommendedImageRectHeight;
@@ -821,11 +801,11 @@ private:
             for (uint32_t j = 0; j < colorSwapchainImageCount; j++) {
                 Diligent::TextureDesc imgDesc;
                 std::string name = "Color Swapchain Image " + std::to_string(j);
-                imgDesc.Name      = name.c_str();
-                imgDesc.Type      = Diligent::RESOURCE_DIM_TEX_2D;
-                imgDesc.Format    = m_colorFormat;
-                imgDesc.Width     = swapchainCI.width;
-                imgDesc.Height    = swapchainCI.height;
+                imgDesc.Name = name.c_str();
+                imgDesc.Type = Diligent::RESOURCE_DIM_TEX_2D;
+                imgDesc.Format = m_colorFormat;
+                imgDesc.Width = swapchainCI.width;
+                imgDesc.Height = swapchainCI.height;
                 imgDesc.MipLevels = 1;
                 imgDesc.BindFlags = Diligent::BIND_RENDER_TARGET | Diligent::BIND_SHADER_RESOURCE;
 
@@ -840,11 +820,11 @@ private:
             for (uint32_t j = 0; j < depthSwapchainImageCount; j++) {
                 Diligent::TextureDesc imgDesc;
                 std::string name = "Depth Swapchain Image " + std::to_string(j);
-                imgDesc.Name      = name.c_str();
-                imgDesc.Type      = Diligent::RESOURCE_DIM_TEX_2D;
-                imgDesc.Format    = m_depthFormat;
-                imgDesc.Width     = swapchainCI.width;
-                imgDesc.Height    = swapchainCI.height;
+                imgDesc.Name = name.c_str();
+                imgDesc.Type = Diligent::RESOURCE_DIM_TEX_2D;
+                imgDesc.Format = m_depthFormat;
+                imgDesc.Width = swapchainCI.width;
+                imgDesc.Height = swapchainCI.height;
                 imgDesc.MipLevels = 1;
                 imgDesc.BindFlags = Diligent::BIND_DEPTH_STENCIL | Diligent::BIND_SHADER_RESOURCE;
 
@@ -878,7 +858,6 @@ private:
     }
 
     // XR_DOCS_TAG_BEGIN_RenderCuboid1
-    size_t renderCuboidIndex = 0;
     // XR_DOCS_TAG_END_RenderCuboid1
     void RenderCuboid(XrPosef pose, XrVector3f scale, XrVector3f color) {
         // XR_DOCS_TAG_BEGIN_RenderCuboid2
@@ -886,23 +865,19 @@ private:
 
         XrMatrix4x4f_Multiply(&cameraConstants.modelViewProj, &cameraConstants.viewProj, &cameraConstants.model);
         cameraConstants.color = {color.x, color.y, color.z, 1.0};
-        size_t offsetCameraUB = sizeof(CameraConstants) * renderCuboidIndex;
+        {
+            Diligent::MapHelper<CameraConstants> gpuConstants{m_context, m_uniformBuffer_Camera, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD};
+            *gpuConstants = cameraConstants;
+        }
 
-#if 0
-        m_graphicsAPI->SetPipeline(m_pipeline);
+        m_context->SetPipelineState(m_pipeline);
+        m_context->CommitShaderResources(m_srb, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
-        m_graphicsAPI->SetBufferData(m_uniformBuffer_Camera, offsetCameraUB, sizeof(CameraConstants), &cameraConstants);
-        m_graphicsAPI->SetDescriptor({0, m_uniformBuffer_Camera, GraphicsAPI::DescriptorInfo::Type::BUFFER, GraphicsAPI::DescriptorInfo::Stage::VERTEX, false, offsetCameraUB, sizeof(CameraConstants)});
-        m_graphicsAPI->SetDescriptor({1, m_uniformBuffer_Normals, GraphicsAPI::DescriptorInfo::Type::BUFFER, GraphicsAPI::DescriptorInfo::Stage::VERTEX, false, 0, sizeof(normals)});
+        Diligent::IBuffer *vbs[] = {m_vertexBuffer};
+        m_context->SetVertexBuffers(0, 1, vbs, nullptr, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION, Diligent::SET_VERTEX_BUFFERS_FLAG_RESET);
+        m_context->SetIndexBuffer(m_indexBuffer, 0, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 
-        m_graphicsAPI->UpdateDescriptors();
-
-        m_graphicsAPI->SetVertexBuffers(&m_vertexBuffer, 1);
-        m_graphicsAPI->SetIndexBuffer(m_indexBuffer);
-        m_graphicsAPI->DrawIndexed(36);
-#endif
-
-        renderCuboidIndex++;
+        m_context->DrawIndexed({36, Diligent::VT_UINT32, Diligent::DRAW_FLAG_VERIFY_ALL});
         // XR_DOCS_TAG_END_RenderCuboid2
     }
 
@@ -983,8 +958,8 @@ private:
             OPENXR_CHECK(xrWaitSwapchainImage(colorSwapchainInfo.swapchain, &waitInfo), "Failed to wait for Image from the Color Swapchain");
             OPENXR_CHECK(xrWaitSwapchainImage(depthSwapchainInfo.swapchain, &waitInfo), "Failed to wait for Image from the Depth Swapchain");
 
-            Diligent::ITextureView* rtv = colorSwapchainInfo.views[colorImageIndex];
-            Diligent::ITextureView* dsv = depthSwapchainInfo.views[depthImageIndex];
+            Diligent::ITextureView *rtv = colorSwapchainInfo.views[colorImageIndex];
+            Diligent::ITextureView *dsv = depthSwapchainInfo.views[depthImageIndex];
 
             // Swap chain images acquired by xrAcquireSwapchainImage are guaranteed to be in
             // COLOR_ATTACHMENT_OPTIMAL/DEPTH_STENCIL_ATTACHMENT_OPTIMAL state.
@@ -1017,27 +992,14 @@ private:
             renderLayerInfo.layerProjectionViews[i].subImage.imageRect.extent.height = static_cast<int32_t>(height);
             renderLayerInfo.layerProjectionViews[i].subImage.imageArrayIndex = 0;  // Useful for multiview rendering.
 
-
-#if 0
-            if (m_environmentBlendMode == XR_ENVIRONMENT_BLEND_MODE_OPAQUE) {
-                // VR mode use a background color.
-                m_graphicsAPI->ClearColor(colorSwapchainInfo.imageViews[colorImageIndex], 0.17f, 0.17f, 0.17f, 1.00f);
-            } else {
-                // In AR mode make the background color black.
-                m_graphicsAPI->ClearColor(colorSwapchainInfo.imageViews[colorImageIndex], 0.00f, 0.00f, 0.00f, 1.00f);
-            }
-            m_graphicsAPI->ClearDepth(depthSwapchainInfo.imageViews[depthImageIndex], 1.0f);
             // XR_DOCS_TAG_END_RenderLayer1
 
             // XR_DOCS_TAG_BEGIN_SetupFrameRendering
-            m_graphicsAPI->SetRenderAttachments(&colorSwapchainInfo.imageViews[colorImageIndex], 1, depthSwapchainInfo.imageViews[depthImageIndex], width, height, m_pipeline);
-            m_graphicsAPI->SetViewports(&viewport, 1);
-            m_graphicsAPI->SetScissors(&scissor, 1);
 
             // Compute the view-projection transform.
             // All matrices (including OpenXR's) are column-major, right-handed.
             XrMatrix4x4f proj;
-            XrMatrix4x4f_CreateProjectionFov(&proj, m_apiType, views[i].fov, nearZ, farZ);
+            XrMatrix4x4f_CreateProjectionFov(&proj, DiligentDeviceTypeToGraphicsAPIType(m_apiType), views[i].fov, nearZ, farZ);
             XrMatrix4x4f toView;
             XrVector3f scale1m{1.0f, 1.0f, 1.0f};
             XrMatrix4x4f_CreateTranslationRotationScale(&toView, &views[i].pose.position, &views[i].pose.orientation, &scale1m);
@@ -1047,16 +1009,14 @@ private:
             // XR_DOCS_TAG_END_SetupFrameRendering
 
             // XR_DOCS_TAG_BEGIN_CallRenderCuboid
-            renderCuboidIndex = 0;
             // Draw a floor. Scale it by 2 in the X and Z, and 0.1 in the Y,
             RenderCuboid({{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, -m_viewHeightM, 0.0f}}, {2.0f, 0.1f, 2.0f}, {0.4f, 0.5f, 0.5f});
             // Draw a "table".
             RenderCuboid({{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, -m_viewHeightM + 0.9f, -0.7f}}, {1.0f, 0.2f, 1.0f}, {0.6f, 0.6f, 0.4f});
             // XR_DOCS_TAG_END_CallRenderCuboid
-#endif
 
             // XR_DOCS_TAG_BEGIN_RenderLayer2
-            // 
+            //
             // Swap chain images must be in COLOR_ATTACHMENT_OPTIMAL/DEPTH_STENCIL_ATTACHMENT_OPTIMAL state
             // when they are released by xrReleaseSwapchainImage.
             // Since they are already in the correct states, no transitions are necessary.
@@ -1145,7 +1105,7 @@ private:
             int events = 0;
             // The timeout depends on whether the application is active.
             const int timeoutMilliseconds = (!androidAppState.resumed && !m_sessionRunning && androidApp->destroyRequested == 0) ? -1 : 0;
-            if (ALooper_pollOnce(timeoutMilliseconds, nullptr, &events, (void**)&source) >= 0) {
+            if (ALooper_pollOnce(timeoutMilliseconds, nullptr, &events, (void **)&source) >= 0) {
                 if (source != nullptr) {
                     source->process(androidApp, source);
                 }
@@ -1215,18 +1175,17 @@ private:
     float m_viewHeightM = 1.5f;
 
     // Vertex and index buffers: geometry for our cuboids.
-    void *m_vertexBuffer = nullptr;
-    void *m_indexBuffer = nullptr;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> m_vertexBuffer;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> m_indexBuffer;
     // Camera values constant buffer for the shaders.
-    void *m_uniformBuffer_Camera = nullptr;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> m_uniformBuffer_Camera;
     // The normals are stored in a uniform buffer to simplify our vertex geometry.
-    void *m_uniformBuffer_Normals = nullptr;
-
-    // We use only two shaders in this app.
-    void *m_vertexShader = nullptr, *m_fragmentShader = nullptr;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> m_uniformBuffer_Normals;
 
     // The pipeline is a graphics-API specific state object.
-    void *m_pipeline = nullptr;
+    Diligent::RefCntAutoPtr<Diligent::IPipelineState> m_pipeline;
+    // Shader resource binding object encapsulates shader resources required by the pipeline.
+    Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> m_srb;
 };
 
 void OpenXRTutorial_Main(Diligent::RENDER_DEVICE_TYPE apiType) {

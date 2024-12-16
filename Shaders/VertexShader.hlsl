@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-cbuffer CameraConstants : register(b0)
+cbuffer CameraConstants : register(b0) // Registers are irrelevant in Diligent Engine
 {
     float4x4 viewProj;
     float4x4 modelViewProj;
@@ -12,7 +12,7 @@ cbuffer CameraConstants : register(b0)
     float4 pad2;
     float4 pad3;
 };
-cbuffer Normals : register(b1)
+cbuffer Normals : register(b1) // Registers are irrelevant in Diligent Engine
 {
     float4 normals[6];
 };
@@ -20,7 +20,8 @@ cbuffer Normals : register(b1)
 struct VS_IN
 {
     uint vertexId : SV_VertexId;
-    float4 a_Positions : TEXCOORD0;
+    // Vertex input attributes in Diligent Engine need to have ATTRIBx semantic
+    float4 a_Positions : ATTRIB0;
 };
 struct VS_OUT
 {

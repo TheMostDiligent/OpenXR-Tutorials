@@ -204,6 +204,11 @@ else() # Windows / Linux
         # XR_DOCS_TAG_END_Linux
     endif()
 
+    set_source_files_properties(${HLSL_SHADERS} PROPERTIES VS_TOOL_OVERRIDE "None")
+    set_target_properties(${PROJECT_NAME} PROPERTIES 
+        VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    target_sources(${PROJECT_NAME} PRIVATE ${HLSL_SHADERS})
     target_link_libraries(${PROJECT_NAME}
         Diligent-GraphicsEngineD3D11-static
         Diligent-GraphicsEngineD3D12-static

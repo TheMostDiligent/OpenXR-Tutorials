@@ -491,8 +491,8 @@ inline static void XrMatrix4x4f_CreateProjection(XrMatrix4x4f* result, GraphicsA
     const float tanAngleWidth = tanAngleRight - tanAngleLeft;
 
     // Set to tanAngleDown - tanAngleUp for a clip space with positive Y down (Vulkan).
-    // Set to tanAngleUp - tanAngleDown for a clip space with positive Y up (OpenGL / D3D / Metal).
-    const float tanAngleHeight = graphicsApi == VULKAN ? (tanAngleDown - tanAngleUp) : (tanAngleUp - tanAngleDown);
+    // Diligent uses positive Y up.
+    const float tanAngleHeight = tanAngleUp - tanAngleDown;
 
     // Set to nearZ for a [-1,1] Z clip space (OpenGL / OpenGL ES).
     // Set to zero for a [0,1] Z clip space (Vulkan / D3D / Metal).
