@@ -20,6 +20,19 @@ set(XR_RUNTIME_JSON
 option(XR_TUTORIAL_BUILD_DOCUMENTATION "Build the tutorial documentation?" OFF)
 option(XR_TUTORIAL_BUILD_PROJECTS "Build the tutorial projects?" ON)
 
+include(FetchContent)
+
+message("Fetching Diligent dependencies...")
+FetchContent_Declare(
+    DiligentCore
+    GIT_REPOSITORY https://github.com/DiligentGraphics/DiligentCore.git
+    # Need to use the DiligentCore directory so that other modules can find it
+    # https://github.com/DiligentGraphics/DiligentEngine?tab=readme-ov-file#using-fetchcontent
+    SOURCE_DIR _deps/DiligentCore
+)
+set(DILIGENT_USE_OPENXR ON)
+FetchContent_MakeAvailable(DiligentCore)
+
 if(XR_TUTORIAL_BUILD_DOCUMENTATION)
     add_subdirectory(tutorial)
 

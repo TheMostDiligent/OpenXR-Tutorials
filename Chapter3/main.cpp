@@ -5,24 +5,39 @@
 // OpenXR Tutorial for Khronos Group
 
 #include <DebugOutput.h>
-// XR_DOCS_TAG_BEGIN_include_GraphicsAPI_D3D11
-#include <GraphicsAPI_D3D11.h>
-// XR_DOCS_TAG_END_include_GraphicsAPI_D3D11
-// XR_DOCS_TAG_BEGIN_include_GraphicsAPI_D3D12
-#include <GraphicsAPI_D3D12.h>
-// XR_DOCS_TAG_END_include_GraphicsAPI_D3D12
-// XR_DOCS_TAG_BEGIN_include_GraphicsAPI_OpenGL
-#include <GraphicsAPI_OpenGL.h>
-// XR_DOCS_TAG_END_include_GraphicsAPI_OpenGL
-// XR_DOCS_TAG_BEGIN_include_GraphicsAPI_OpenGL_ES
-#include <GraphicsAPI_OpenGL_ES.h>
-// XR_DOCS_TAG_END_include_GraphicsAPI_OpenGL_ES
-// XR_DOCS_TAG_BEGIN_include_GraphicsAPI_Vulkan
-#include <GraphicsAPI_Vulkan.h>
-// XR_DOCS_TAG_END_include_GraphicsAPI_Vulkan
+
+#if D3D11_SUPPORTED
+#    include "EngineFactoryD3D11.h"
+#endif
+
+#if D3D12_SUPPORTED
+#    include "EngineFactoryD3D12.h"
+#endif
+
+#if GL_SUPPORTED
+#    include "EngineFactoryOpenGL.h"
+#endif
+
+#if VULKAN_SUPPORTED
+#    include "EngineFactoryVk.h"
+#endif
+
+#include "RenderDevice.h"
+#include "DeviceContext.h"
+#include "SwapChain.h"
+
+#include "RefCntAutoPtr.hpp"
+#include "OpenXRUtilities.h"
+#include "GraphicsUtilities.h"
+#include "GraphicsAccessories.hpp"
+#include "GraphicsTypesX.hpp"
+#include "MapHelper.hpp"
+
 // XR_DOCS_TAG_BEGIN_include_OpenXRDebugUtils
 #include <OpenXRDebugUtils.h>
 // XR_DOCS_TAG_END_include_OpenXRDebugUtils
+
+#include <GraphicsAPI.h>
 
 // XR_DOCS_TAG_BEGIN_include_linear_algebra
 // include xr linear algebra for XrVector and XrMatrix classes.
@@ -38,18 +53,45 @@ XrVector3f operator*(XrVector3f a, float b) {
 
 #define XR_DOCS_CHAPTER_VERSION XR_DOCS_CHAPTER_3_3
 
+
+const char* GetGraphicsAPIInstanceExtensionString(Diligent::RENDER_DEVICE_TYPE Type)
+{
+    switch (Type)
+    {
+#if D3D11_SUPPORTED
+        case Diligent::RENDER_DEVICE_TYPE_D3D11: return "XR_KHR_D3D11_enable";
+#endif
+
+#if D3D12_SUPPORTED
+        case Diligent::RENDER_DEVICE_TYPE_D3D12: return "XR_KHR_D3D12_enable";
+#endif
+
+#if GL_SUPPORTED
+        case Diligent::RENDER_DEVICE_TYPE_GL: return "XR_KHR_opengl_enable";
+#endif
+
+#if VULKAN_SUPPORTED
+        case Diligent::RENDER_DEVICE_TYPE_VULKAN: return "XR_KHR_vulkan_enable2";
+#endif
+
+        default:
+            UNEXPECTED("Unknown device type");
+            return nullptr;
+    }
+}
+
 class OpenXRTutorial {
 private:
     struct RenderLayerInfo;
 
 public:
-    OpenXRTutorial(GraphicsAPI_Type apiType)
+    OpenXRTutorial(Diligent::RENDER_DEVICE_TYPE apiType)
         : m_apiType(apiType) {
         // Check API compatibility with Platform.
-        if (!CheckGraphicsAPI_TypeIsValidForPlatform(m_apiType)) {
-            XR_TUT_LOG_ERROR("ERROR: The provided Graphics API is not valid for this platform.");
-            DEBUG_BREAK;
-        }
+        //if (!CheckGraphicsAPI_TypeIsValidForPlatform(m_apiType)) {
+        //    XR_TUT_LOG_ERROR("ERROR: The provided Graphics API is not valid for this platform.");
+        //    DEBUG_BREAK;
+        //}
     }
     ~OpenXRTutorial() = default;
 
@@ -66,6 +108,8 @@ public:
 #if XR_DOCS_CHAPTER_VERSION >= XR_DOCS_CHAPTER_3_2
         GetEnvironmentBlendModes();
 #endif
+
+        InitializeGraphics();
 
 #if XR_DOCS_CHAPTER_VERSION >= XR_DOCS_CHAPTER_2_2
         CreateSession();
@@ -89,6 +133,11 @@ public:
             }
         }
 #endif
+
+        // Flush any remaining commands
+        m_context->Flush();
+        // Make sure that the swap chains are not used by the GPU before they are destroyed
+        m_renderDevice.IdleGPU();
 
 #if XR_DOCS_CHAPTER_VERSION >= XR_DOCS_CHAPTER_3_1
         DestroySwapchains();
@@ -291,41 +340,109 @@ private:
         // XR_DOCS_TAG_END_GetViewConfigurationViews
     }
 
+    void InitializeGraphics()
+    {
+        Diligent::OpenXRAttribs xrAttribs;
+        static_assert(sizeof(xrAttribs.Instance) == sizeof(m_xrInstance), "XrInstance size mismatch");
+        memcpy(&xrAttribs.Instance, &m_xrInstance, sizeof(m_xrInstance));
+        static_assert(sizeof(xrAttribs.SystemId) == sizeof(m_systemID), "XrSystemID size mismatch");
+        memcpy(&xrAttribs.SystemId, &m_systemID, sizeof(m_systemID));
+        xrAttribs.GetInstanceProcAddr = xrGetInstanceProcAddr;
+
+        Diligent::RefCntAutoPtr<Diligent::IRenderDevice> renderDevice;
+        switch (m_apiType)
+        {
+#if D3D11_SUPPORTED
+            case Diligent::RENDER_DEVICE_TYPE_D3D11:
+            {
+                Diligent::EngineD3D11CreateInfo engineCI;
+                engineCI.pXRAttribs = &xrAttribs;
+#    if ENGINE_DLL
+                // Load the dll and import GetEngineFactoryD3D11() function
+                auto* GetEngineFactoryD3D11 = LoadGraphicsEngineD3D11();
+#    endif
+                auto* factoryD3D11 = Diligent::GetEngineFactoryD3D11();
+                factoryD3D11->CreateDeviceAndContextsD3D11(engineCI, &renderDevice, &m_context);
+            }
+            break;
+#endif
+
+
+#if D3D12_SUPPORTED
+            case Diligent::RENDER_DEVICE_TYPE_D3D12:
+            {
+#    if ENGINE_DLL
+                // Load the dll and import GetEngineFactoryD3D12() function
+                auto GetEngineFactoryD3D12 = LoadGraphicsEngineD3D12();
+#    endif
+                Diligent::EngineD3D12CreateInfo engineCI;
+                engineCI.pXRAttribs = &xrAttribs;
+
+                auto* factoryD3D12 = Diligent::GetEngineFactoryD3D12();
+                factoryD3D12->CreateDeviceAndContextsD3D12(engineCI, &renderDevice, &m_context);
+            }
+            break;
+#endif
+
+
+#if GL_SUPPORTED
+            case Diligent::RENDER_DEVICE_TYPE_GL:
+            {
+#    if 0
+#        if EXPLICITLY_LOAD_ENGINE_GL_DLL
+                // Load the dll and import GetEngineFactoryOpenGL() function
+                auto GetEngineFactoryOpenGL = LoadGraphicsEngineOpenGL();
+#        endif
+                auto* factoryOpenGL = GetEngineFactoryOpenGL();
+
+                Diligent::EngineGLCreateInfo engineCI;
+                engineCI.pXRAttribs  = &XRAttribs;
+                engineCI.Window.hWnd = hWnd;
+
+                factoryOpenGL->CreateDeviceAndSwapChainGL(EngineCI, &renderDevice, &m_context, scDesc, &m_swapChain);
+#    endif
+            }
+            break;
+#endif
+
+
+#if VULKAN_SUPPORTED
+            case Diligent::RENDER_DEVICE_TYPE_VULKAN:
+            {
+#    if EXPLICITLY_LOAD_ENGINE_VK_DLL
+                // Load the dll and import GetEngineFactoryVk() function
+                auto GetEngineFactoryVk = LoadGraphicsEngineVk();
+#    endif
+                Diligent::EngineVkCreateInfo engineCI;
+                engineCI.pXRAttribs = &xrAttribs;
+
+                auto* factoryVk = Diligent::GetEngineFactoryVk();
+                factoryVk->CreateDeviceAndContextsVk(engineCI, &renderDevice, &m_context);
+            }
+            break;
+#endif
+
+            default:
+                XR_TUT_LOG_ERROR("Unknown/unsupported device type");
+                DEBUG_BREAK;
+                break;
+        }
+
+        m_renderDevice = renderDevice;
+    }
+
     void CreateSession() {
         // Create an XrSessionCreateInfo structure.
         // XR_DOCS_TAG_BEGIN_CreateSession1
         XrSessionCreateInfo sessionCI{XR_TYPE_SESSION_CREATE_INFO};
         // XR_DOCS_TAG_END_CreateSession1
 
-        // Create a std::unique_ptr<GraphicsAPI_...> from the instance and system.
-        // This call sets up a graphics API that's suitable for use with OpenXR.
-        if (m_apiType == D3D11) {
-#if defined(XR_USE_GRAPHICS_API_D3D11)
-            m_graphicsAPI = std::make_unique<GraphicsAPI_D3D11>(m_xrInstance, m_systemID);
-#endif
-        } else if (m_apiType == D3D12) {
-#if defined(XR_USE_GRAPHICS_API_D3D12)
-            m_graphicsAPI = std::make_unique<GraphicsAPI_D3D12>(m_xrInstance, m_systemID);
-#endif
-        } else if (m_apiType == OPENGL) {
-#if defined(XR_USE_GRAPHICS_API_OPENGL)
-            m_graphicsAPI = std::make_unique<GraphicsAPI_OpenGL>(m_xrInstance, m_systemID);
-#endif
-        } else if (m_apiType == OPENGL_ES) {
-#if defined(XR_USE_GRAPHICS_API_OPENGL_ES)
-            m_graphicsAPI = std::make_unique<GraphicsAPI_OpenGL_ES>(m_xrInstance, m_systemID);
-#endif
-        } else if (m_apiType == VULKAN) {
-#if defined(XR_USE_GRAPHICS_API_VULKAN)
-            m_graphicsAPI = std::make_unique<GraphicsAPI_Vulkan>(m_xrInstance, m_systemID);
-#endif
-        } else {
-            XR_TUT_LOG_ERROR("ERROR: Unknown Graphics API.");
-            DEBUG_BREAK;
-        }
+        Diligent::RefCntAutoPtr<Diligent::IDataBlob> graphicsBindingData;
+        Diligent::GetOpenXRGraphicsBinding(m_renderDevice, m_context, &graphicsBindingData);
+
         // Fill out the XrSessionCreateInfo structure and create an XrSession.
         //  XR_DOCS_TAG_BEGIN_CreateSession2
-        sessionCI.next = m_graphicsAPI->GetGraphicsBinding();
+        sessionCI.next = graphicsBindingData->GetConstDataPtr();
         sessionCI.createFlags = 0;
         sessionCI.systemId = m_systemID;
 
@@ -361,6 +478,7 @@ private:
     // XR_DOCS_TAG_END_CreateResources1
 
     void CreateResources() {
+#if 0
         // XR_DOCS_TAG_BEGIN_CreateResources1_1
         // Vertices for a 1x1x1 meter cube. (Left/Right, Top/Bottom, Front/Back)
         constexpr XrVector4f vertexPositions[] = {
@@ -472,8 +590,10 @@ private:
                              {2, nullptr, GraphicsAPI::DescriptorInfo::Type::BUFFER, GraphicsAPI::DescriptorInfo::Stage::FRAGMENT}};
         m_pipeline = m_graphicsAPI->CreatePipeline(pipelineCI);
         // XR_DOCS_TAG_END_CreateResources3
+#endif
     }
     void DestroyResources() {
+#if 0
         // XR_DOCS_TAG_BEGIN_DestroyResources
         m_graphicsAPI->DestroyPipeline(m_pipeline);
         m_graphicsAPI->DestroyShader(m_fragmentShader);
@@ -483,6 +603,7 @@ private:
         m_graphicsAPI->DestroyBuffer(m_indexBuffer);
         m_graphicsAPI->DestroyBuffer(m_vertexBuffer);
         // XR_DOCS_TAG_END_DestroyResources
+#endif
     }
 
     void PollEvents() {
@@ -597,10 +718,45 @@ private:
         OPENXR_CHECK(xrEnumerateSwapchainFormats(m_session, 0, &formatCount, nullptr), "Failed to enumerate Swapchain Formats");
         std::vector<int64_t> formats(formatCount);
         OPENXR_CHECK(xrEnumerateSwapchainFormats(m_session, formatCount, &formatCount, formats.data()), "Failed to enumerate Swapchain Formats");
-        if (m_graphicsAPI->SelectDepthSwapchainFormat(formats) == 0) {
-            std::cerr << "Failed to find depth format for Swapchain." << std::endl;
+
+        int64_t nativeColorFormat = 0;
+        int64_t nativeDepthFormat = 0;
+        for (int64_t nativeFormat : formats)
+        {
+            const Diligent::TEXTURE_FORMAT        format     = Diligent::GetTextureFormatFromNative(nativeFormat, m_apiType);
+            const Diligent::TextureFormatAttribs& fmtAttribs = Diligent::GetTextureFormatAttribs(format);
+            if (fmtAttribs.IsDepthStencil())
+            {
+                if (nativeDepthFormat == 0)
+                {
+                    m_depthFormat     = format;
+                    nativeDepthFormat = nativeFormat;
+                }
+            }
+            else
+            {
+                if (nativeColorFormat == 0)
+                {
+                    m_colorFormat     = format;
+                    nativeColorFormat = nativeFormat;
+                }
+            }
+
+            if (nativeColorFormat != 0 && nativeDepthFormat != 0)
+                break;
+        }
+
+        if (nativeColorFormat == 0)
+        {
+            std::cerr << "Failed to find a compatible color format for Swapchain";
             DEBUG_BREAK;
         }
+        if (nativeDepthFormat == 0)
+        {
+            std::cerr << "Failed to find a compatible depth format for Swapchain";
+            DEBUG_BREAK;
+        }
+
         // XR_DOCS_TAG_END_EnumerateSwapchainFormats
 
         // XR_DOCS_TAG_BEGIN_ResizeSwapchainInfos
@@ -620,7 +776,7 @@ private:
             XrSwapchainCreateInfo swapchainCI{XR_TYPE_SWAPCHAIN_CREATE_INFO};
             swapchainCI.createFlags = 0;
             swapchainCI.usageFlags = XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
-            swapchainCI.format = m_graphicsAPI->SelectColorSwapchainFormat(formats);                // Use GraphicsAPI to select the first compatible format.
+            swapchainCI.format = nativeColorFormat;                
             swapchainCI.sampleCount = m_viewConfigurationViews[i].recommendedSwapchainSampleCount;  // Use the recommended values from the XrViewConfigurationView.
             swapchainCI.width = m_viewConfigurationViews[i].recommendedImageRectWidth;
             swapchainCI.height = m_viewConfigurationViews[i].recommendedImageRectHeight;
@@ -633,7 +789,7 @@ private:
             // Depth.
             swapchainCI.createFlags = 0;
             swapchainCI.usageFlags = XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-            swapchainCI.format = m_graphicsAPI->SelectDepthSwapchainFormat(formats);                // Use GraphicsAPI to select the first compatible format.
+            swapchainCI.format = nativeDepthFormat;
             swapchainCI.sampleCount = m_viewConfigurationViews[i].recommendedSwapchainSampleCount;  // Use the recommended values from the XrViewConfigurationView.
             swapchainCI.width = m_viewConfigurationViews[i].recommendedImageRectWidth;
             swapchainCI.height = m_viewConfigurationViews[i].recommendedImageRectHeight;
@@ -648,42 +804,56 @@ private:
             // Get the number of images in the color/depth swapchain and allocate Swapchain image data via GraphicsAPI to store the returned array.
             uint32_t colorSwapchainImageCount = 0;
             OPENXR_CHECK(xrEnumerateSwapchainImages(colorSwapchainInfo.swapchain, 0, &colorSwapchainImageCount, nullptr), "Failed to enumerate Color Swapchain Images.");
-            XrSwapchainImageBaseHeader *colorSwapchainImages = m_graphicsAPI->AllocateSwapchainImageData(colorSwapchainInfo.swapchain, GraphicsAPI::SwapchainType::COLOR, colorSwapchainImageCount);
-            OPENXR_CHECK(xrEnumerateSwapchainImages(colorSwapchainInfo.swapchain, colorSwapchainImageCount, &colorSwapchainImageCount, colorSwapchainImages), "Failed to enumerate Color Swapchain Images.");
+            Diligent::RefCntAutoPtr<Diligent::IDataBlob> colorSwapchainImages;
+            Diligent::AllocateOpenXRSwapchainImageData(m_apiType, colorSwapchainImageCount, &colorSwapchainImages);
+            OPENXR_CHECK(xrEnumerateSwapchainImages(colorSwapchainInfo.swapchain, colorSwapchainImageCount, &colorSwapchainImageCount, colorSwapchainImages->GetDataPtr<XrSwapchainImageBaseHeader>()), "Failed to enumerate Color Swapchain Images.");
 
             uint32_t depthSwapchainImageCount = 0;
             OPENXR_CHECK(xrEnumerateSwapchainImages(depthSwapchainInfo.swapchain, 0, &depthSwapchainImageCount, nullptr), "Failed to enumerate Depth Swapchain Images.");
-            XrSwapchainImageBaseHeader *depthSwapchainImages = m_graphicsAPI->AllocateSwapchainImageData(depthSwapchainInfo.swapchain, GraphicsAPI::SwapchainType::DEPTH, depthSwapchainImageCount);
-            OPENXR_CHECK(xrEnumerateSwapchainImages(depthSwapchainInfo.swapchain, depthSwapchainImageCount, &depthSwapchainImageCount, depthSwapchainImages), "Failed to enumerate Depth Swapchain Images.");
+            Diligent::RefCntAutoPtr<Diligent::IDataBlob> depthSwapchainImages;
+            Diligent::AllocateOpenXRSwapchainImageData(m_apiType, depthSwapchainImageCount, &depthSwapchainImages);
+            OPENXR_CHECK(xrEnumerateSwapchainImages(depthSwapchainInfo.swapchain, depthSwapchainImageCount, &depthSwapchainImageCount, depthSwapchainImages->GetDataPtr<XrSwapchainImageBaseHeader>()), "Failed to enumerate Depth Swapchain Images.");
             // XR_DOCS_TAG_END_EnumerateSwapchainImages
 
             // XR_DOCS_TAG_BEGIN_CreateImageViews
             // Per image in the swapchains, fill out a GraphicsAPI::ImageViewCreateInfo structure and create a color/depth image view.
+            colorSwapchainInfo.views.resize(colorSwapchainImageCount);
             for (uint32_t j = 0; j < colorSwapchainImageCount; j++) {
-                GraphicsAPI::ImageViewCreateInfo imageViewCI;
-                imageViewCI.image = m_graphicsAPI->GetSwapchainImage(colorSwapchainInfo.swapchain, j);
-                imageViewCI.type = GraphicsAPI::ImageViewCreateInfo::Type::RTV;
-                imageViewCI.view = GraphicsAPI::ImageViewCreateInfo::View::TYPE_2D;
-                imageViewCI.format = colorSwapchainInfo.swapchainFormat;
-                imageViewCI.aspect = GraphicsAPI::ImageViewCreateInfo::Aspect::COLOR_BIT;
-                imageViewCI.baseMipLevel = 0;
-                imageViewCI.levelCount = 1;
-                imageViewCI.baseArrayLayer = 0;
-                imageViewCI.layerCount = 1;
-                colorSwapchainInfo.imageViews.push_back(m_graphicsAPI->CreateImageView(imageViewCI));
+                Diligent::TextureDesc imgDesc;
+                std::string name = "Color Swapchain Image " + std::to_string(j);
+                imgDesc.Name      = name.c_str();
+                imgDesc.Type      = Diligent::RESOURCE_DIM_TEX_2D;
+                imgDesc.Format    = m_colorFormat;
+                imgDesc.Width     = swapchainCI.width;
+                imgDesc.Height    = swapchainCI.height;
+                imgDesc.MipLevels = 1;
+                imgDesc.BindFlags = Diligent::BIND_RENDER_TARGET | Diligent::BIND_SHADER_RESOURCE;
+
+                Diligent::RefCntAutoPtr<Diligent::ITexture> image;
+                Diligent::GetOpenXRSwapchainImage(m_renderDevice, colorSwapchainImages->GetConstDataPtr<XrSwapchainImageBaseHeader>(), j, imgDesc, &image);
+
+                Diligent::TextureViewDesc viewDesc;
+                viewDesc.ViewType = Diligent::TEXTURE_VIEW_RENDER_TARGET;
+                image->CreateView(viewDesc, &colorSwapchainInfo.views[j]);
             }
+            depthSwapchainInfo.views.resize(colorSwapchainImageCount);
             for (uint32_t j = 0; j < depthSwapchainImageCount; j++) {
-                GraphicsAPI::ImageViewCreateInfo imageViewCI;
-                imageViewCI.image = m_graphicsAPI->GetSwapchainImage(depthSwapchainInfo.swapchain, j);
-                imageViewCI.type = GraphicsAPI::ImageViewCreateInfo::Type::DSV;
-                imageViewCI.view = GraphicsAPI::ImageViewCreateInfo::View::TYPE_2D;
-                imageViewCI.format = depthSwapchainInfo.swapchainFormat;
-                imageViewCI.aspect = GraphicsAPI::ImageViewCreateInfo::Aspect::DEPTH_BIT;
-                imageViewCI.baseMipLevel = 0;
-                imageViewCI.levelCount = 1;
-                imageViewCI.baseArrayLayer = 0;
-                imageViewCI.layerCount = 1;
-                depthSwapchainInfo.imageViews.push_back(m_graphicsAPI->CreateImageView(imageViewCI));
+                Diligent::TextureDesc imgDesc;
+                std::string name = "Depth Swapchain Image " + std::to_string(j);
+                imgDesc.Name      = name.c_str();
+                imgDesc.Type      = Diligent::RESOURCE_DIM_TEX_2D;
+                imgDesc.Format    = m_depthFormat;
+                imgDesc.Width     = swapchainCI.width;
+                imgDesc.Height    = swapchainCI.height;
+                imgDesc.MipLevels = 1;
+                imgDesc.BindFlags = Diligent::BIND_DEPTH_STENCIL | Diligent::BIND_SHADER_RESOURCE;
+
+                Diligent::RefCntAutoPtr<Diligent::ITexture> image;
+                Diligent::GetOpenXRSwapchainImage(m_renderDevice, depthSwapchainImages->GetConstDataPtr<XrSwapchainImageBaseHeader>(), j, imgDesc, &image);
+
+                Diligent::TextureViewDesc viewDesc;
+                viewDesc.ViewType = Diligent::TEXTURE_VIEW_DEPTH_STENCIL;
+                image->CreateView(viewDesc, &depthSwapchainInfo.views[j]);
             }
             // XR_DOCS_TAG_END_CreateImageViews
         }
@@ -697,16 +867,8 @@ private:
             SwapchainInfo &depthSwapchainInfo = m_depthSwapchainInfos[i];
 
             // Destroy the color and depth image views from GraphicsAPI.
-            for (void *&imageView : colorSwapchainInfo.imageViews) {
-                m_graphicsAPI->DestroyImageView(imageView);
-            }
-            for (void *&imageView : depthSwapchainInfo.imageViews) {
-                m_graphicsAPI->DestroyImageView(imageView);
-            }
-
-            // Free the Swapchain Image Data.
-            m_graphicsAPI->FreeSwapchainImageData(colorSwapchainInfo.swapchain);
-            m_graphicsAPI->FreeSwapchainImageData(depthSwapchainInfo.swapchain);
+            colorSwapchainInfo.views.clear();
+            depthSwapchainInfo.views.clear();
 
             // Destroy the swapchains.
             OPENXR_CHECK(xrDestroySwapchain(colorSwapchainInfo.swapchain), "Failed to destroy Color Swapchain");
@@ -726,6 +888,7 @@ private:
         cameraConstants.color = {color.x, color.y, color.z, 1.0};
         size_t offsetCameraUB = sizeof(CameraConstants) * renderCuboidIndex;
 
+#if 0
         m_graphicsAPI->SetPipeline(m_pipeline);
 
         m_graphicsAPI->SetBufferData(m_uniformBuffer_Camera, offsetCameraUB, sizeof(CameraConstants), &cameraConstants);
@@ -737,6 +900,7 @@ private:
         m_graphicsAPI->SetVertexBuffers(&m_vertexBuffer, 1);
         m_graphicsAPI->SetIndexBuffer(m_indexBuffer);
         m_graphicsAPI->DrawIndexed(36);
+#endif
 
         renderCuboidIndex++;
         // XR_DOCS_TAG_END_RenderCuboid2
@@ -819,11 +983,25 @@ private:
             OPENXR_CHECK(xrWaitSwapchainImage(colorSwapchainInfo.swapchain, &waitInfo), "Failed to wait for Image from the Color Swapchain");
             OPENXR_CHECK(xrWaitSwapchainImage(depthSwapchainInfo.swapchain, &waitInfo), "Failed to wait for Image from the Depth Swapchain");
 
-            // Get the width and height and construct the viewport and scissors.
-            const uint32_t &width = m_viewConfigurationViews[i].recommendedImageRectWidth;
-            const uint32_t &height = m_viewConfigurationViews[i].recommendedImageRectHeight;
-            GraphicsAPI::Viewport viewport = {0.0f, 0.0f, (float)width, (float)height, 0.0f, 1.0f};
-            GraphicsAPI::Rect2D scissor = {{(int32_t)0, (int32_t)0}, {width, height}};
+            Diligent::ITextureView* rtv = colorSwapchainInfo.views[colorImageIndex];
+            Diligent::ITextureView* dsv = depthSwapchainInfo.views[depthImageIndex];
+
+            // Swap chain images acquired by xrAcquireSwapchainImage are guaranteed to be in
+            // COLOR_ATTACHMENT_OPTIMAL/DEPTH_STENCIL_ATTACHMENT_OPTIMAL state.
+            rtv->GetTexture()->SetState(Diligent::RESOURCE_STATE_RENDER_TARGET);
+            dsv->GetTexture()->SetState(Diligent::RESOURCE_STATE_DEPTH_WRITE);
+
+            // SetRenderTargets sets the viewport and scissor rect
+            m_context->SetRenderTargets(1, &rtv, dsv, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+
+            XrVector4f gray{0.17f, 0.17f, 0.17f, 1.00f};
+            XrVector4f black{0.00f, 0.00f, 0.00f, 1.00f};
+            m_context->ClearRenderTarget(rtv, m_environmentBlendMode == XR_ENVIRONMENT_BLEND_MODE_OPAQUE ? &gray.x : &black.x,
+                                         Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+            m_context->ClearDepthStencil(dsv, Diligent::CLEAR_DEPTH_FLAG, 1.f, 0, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+
+            const uint32_t width = m_viewConfigurationViews[i].recommendedImageRectWidth;
+            const uint32_t height = m_viewConfigurationViews[i].recommendedImageRectHeight;
             float nearZ = 0.05f;
             float farZ = 100.0f;
 
@@ -839,9 +1017,8 @@ private:
             renderLayerInfo.layerProjectionViews[i].subImage.imageRect.extent.height = static_cast<int32_t>(height);
             renderLayerInfo.layerProjectionViews[i].subImage.imageArrayIndex = 0;  // Useful for multiview rendering.
 
-            // Rendering code to clear the color and depth image views.
-            m_graphicsAPI->BeginRendering();
 
+#if 0
             if (m_environmentBlendMode == XR_ENVIRONMENT_BLEND_MODE_OPAQUE) {
                 // VR mode use a background color.
                 m_graphicsAPI->ClearColor(colorSwapchainInfo.imageViews[colorImageIndex], 0.17f, 0.17f, 0.17f, 1.00f);
@@ -876,9 +1053,16 @@ private:
             // Draw a "table".
             RenderCuboid({{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, -m_viewHeightM + 0.9f, -0.7f}}, {1.0f, 0.2f, 1.0f}, {0.6f, 0.6f, 0.4f});
             // XR_DOCS_TAG_END_CallRenderCuboid
+#endif
 
             // XR_DOCS_TAG_BEGIN_RenderLayer2
-            m_graphicsAPI->EndRendering();
+            // 
+            // Swap chain images must be in COLOR_ATTACHMENT_OPTIMAL/DEPTH_STENCIL_ATTACHMENT_OPTIMAL state
+            // when they are released by xrReleaseSwapchainImage.
+            // Since they are already in the correct states, no transitions are necessary.
+
+            // Submit the rendering commands to the GPU.
+            m_context->Flush();
 
             // Give the swapchain image back to OpenXR, allowing the compositor to use the image.
             XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
@@ -990,8 +1174,9 @@ private:
     XrSystemId m_systemID = {};
     XrSystemProperties m_systemProperties = {XR_TYPE_SYSTEM_PROPERTIES};
 
-    GraphicsAPI_Type m_apiType = UNKNOWN;
-    std::unique_ptr<GraphicsAPI> m_graphicsAPI = nullptr;
+    Diligent::RENDER_DEVICE_TYPE m_apiType = Diligent::RENDER_DEVICE_TYPE_UNDEFINED;
+    Diligent::RenderDeviceX_N m_renderDevice;
+    Diligent::RefCntAutoPtr<Diligent::IDeviceContext> m_context;
 
     XrSession m_session = {};
     XrSessionState m_sessionState = XR_SESSION_STATE_UNKNOWN;
@@ -1006,8 +1191,11 @@ private:
     struct SwapchainInfo {
         XrSwapchain swapchain = XR_NULL_HANDLE;
         int64_t swapchainFormat = 0;
-        std::vector<void *> imageViews;
+        std::vector<Diligent::RefCntAutoPtr<Diligent::ITextureView>> views;
     };
+    Diligent::TEXTURE_FORMAT m_colorFormat = Diligent::TEX_FORMAT_UNKNOWN;
+    Diligent::TEXTURE_FORMAT m_depthFormat = Diligent::TEX_FORMAT_UNKNOWN;
+
     std::vector<SwapchainInfo> m_colorSwapchainInfos = {};
     std::vector<SwapchainInfo> m_depthSwapchainInfos = {};
 
@@ -1041,7 +1229,7 @@ private:
     void *m_pipeline = nullptr;
 };
 
-void OpenXRTutorial_Main(GraphicsAPI_Type apiType) {
+void OpenXRTutorial_Main(Diligent::RENDER_DEVICE_TYPE apiType) {
     DebugOutput debugOutput;  // This redirects std::cerr and std::cout to the IDE's output or Android Studio's logcat.
     XR_TUT_LOG("OpenXR Tutorial Chapter 3");
 
@@ -1051,7 +1239,7 @@ void OpenXRTutorial_Main(GraphicsAPI_Type apiType) {
 
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
 int main(int argc, char **argv) {
-    OpenXRTutorial_Main(XR_TUTORIAL_GRAPHICS_API);
+    OpenXRTutorial_Main(Diligent::RENDER_DEVICE_TYPE_VULKAN);
 }
 /*
 // XR_DOCS_TAG_BEGIN_main_Windows_Linux_OPENGL
