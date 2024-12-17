@@ -23,14 +23,35 @@
 #endif
 
 #include "DeviceContext.h"
+#include "RenderDevice.h"
+#include "SwapChain.h"
+
 #include "GraphicsAccessories.hpp"
 #include "GraphicsTypesX.hpp"
 #include "GraphicsUtilities.h"
 #include "MapHelper.hpp"
 #include "OpenXRUtilities.h"
 #include "RefCntAutoPtr.hpp"
-#include "RenderDevice.h"
-#include "SwapChain.h"
+
+#include "GLTFLoader.hpp"
+#include "GLTF_PBR_Renderer.hpp"
+#include "TextureUtilities.h"
+
+namespace Diligent
+{
+
+namespace HLSL
+{
+
+#include "Shaders/Common/public/BasicStructures.fxh"
+#include "Shaders/PBR/public/PBR_Structures.fxh"
+#include "Shaders/PBR/private/RenderPBR_Structures.fxh"
+#include "Shaders/PostProcess/ToneMapping/public/ToneMappingStructures.fxh"
+#include "Shaders/PostProcess/ScreenSpaceReflection/public/ScreenSpaceReflectionStructures.fxh"
+
+} // namespace HLSL
+
+}
 
 // XR_DOCS_TAG_BEGIN_include_OpenXRDebugUtils
 #include <OpenXRDebugUtils.h>
@@ -140,6 +161,9 @@ public:
 #if XR_DOCS_CHAPTER_VERSION >= XR_DOCS_CHAPTER_3_3
         CreateResources();
 #endif
+
+        CreateGLTFRenderer();
+        LoadGltfModel("../Assets/DamagedHelmet.gltf");
 
 #if XR_DOCS_CHAPTER_VERSION >= XR_DOCS_CHAPTER_2_3
         while (m_applicationRunning) {
@@ -471,6 +495,7 @@ private:
         XrVector4f pad2;
         XrVector4f pad3;
     };
+    XrMatrix4x4f cameraProj;
     CameraConstants cameraConstants;
     XrVector4f normals[6] = {
         {1.00f, 0.00f, 0.00f, 0},
@@ -592,6 +617,74 @@ private:
         m_indexBuffer.Release();
         m_vertexBuffer.Release();
         // XR_DOCS_TAG_END_DestroyResources
+
+        m_gltfRenderer.reset();
+        m_gltfModel.reset();
+        m_gltfModelResourceBindings.Clear();
+        m_frameAttribsCB.Release();
+    }
+
+    void CreateGLTFRenderer() {
+        Diligent::GLTF_PBR_Renderer::CreateInfo rendererCI;
+
+        rendererCI.EnableClearCoat = true;
+        rendererCI.EnableSheen = true;
+        rendererCI.EnableIridescence = true;
+        rendererCI.EnableTransmission = true;
+        rendererCI.EnableAnisotropy = true;
+        rendererCI.FrontCounterClockwise = true;
+        rendererCI.PackMatrixRowMajor = true;
+        rendererCI.SheenAlbedoScalingLUTPath = "../Textures/sheen_albedo_scaling.jpg";
+        rendererCI.PreintegratedCharlieBRDFPath = "../Textures/charlie_preintegrated.jpg";
+
+        m_gltfRenderInfo.Flags =
+            Diligent::GLTF_PBR_Renderer::PSO_FLAG_DEFAULT |
+            Diligent::GLTF_PBR_Renderer::PSO_FLAG_ENABLE_CLEAR_COAT |
+            Diligent::GLTF_PBR_Renderer::PSO_FLAG_ALL_TEXTURES |
+            Diligent::GLTF_PBR_Renderer::PSO_FLAG_ENABLE_SHEEN |
+            Diligent::GLTF_PBR_Renderer::PSO_FLAG_ENABLE_ANISOTROPY |
+            Diligent::GLTF_PBR_Renderer::PSO_FLAG_ENABLE_IRIDESCENCE |
+            Diligent::GLTF_PBR_Renderer::PSO_FLAG_ENABLE_TRANSMISSION |
+            Diligent::GLTF_PBR_Renderer::PSO_FLAG_ENABLE_VOLUME |
+            Diligent::GLTF_PBR_Renderer::PSO_FLAG_ENABLE_TEXCOORD_TRANSFORM;
+
+        rendererCI.NumRenderTargets = 1;
+        rendererCI.RTVFormats[0]    = m_colorFormat;
+        rendererCI.DSVFormat        = m_depthFormat;
+
+        if (rendererCI.RTVFormats[0] == Diligent::TEX_FORMAT_RGBA8_UNORM || rendererCI.RTVFormats[0] == Diligent::TEX_FORMAT_BGRA8_UNORM)
+            m_gltfRenderInfo.Flags |= Diligent::GLTF_PBR_Renderer::PSO_FLAG_CONVERT_OUTPUT_TO_SRGB;
+
+        m_gltfRenderer = std::make_unique<Diligent::GLTF_PBR_Renderer>(m_renderDevice, nullptr, m_context, rendererCI);
+
+        // Load environment map and precompute IBL
+        Diligent::RefCntAutoPtr<Diligent::ITexture> environmentMap;
+        Diligent::CreateTextureFromFile("../Textures/papermill.ktx", Diligent::TextureLoadInfo{"Environment map"}, m_renderDevice, &environmentMap);
+        m_gltfRenderer->PrecomputeCubemaps(m_context, environmentMap->GetDefaultView(Diligent::TEXTURE_VIEW_SHADER_RESOURCE));
+
+        Diligent::StateTransitionDesc Barriers[] = {
+            {environmentMap, Diligent::RESOURCE_STATE_UNKNOWN, Diligent::RESOURCE_STATE_SHADER_RESOURCE, Diligent::STATE_TRANSITION_FLAG_UPDATE_STATE},
+        };
+        m_context->TransitionResourceStates(_countof(Barriers), Barriers);
+    }
+
+    void LoadGltfModel(const char* Path) {
+        Diligent::GLTF::ModelCreateInfo modelCI;
+        modelCI.FileName = Path;
+
+        m_gltfModel = std::make_unique<Diligent::GLTF::Model>(m_renderDevice, m_context, modelCI);
+
+        Diligent::CreateUniformBuffer(m_renderDevice, m_gltfRenderer->GetPRBFrameAttribsSize(), "PBR frame attribs buffer", &m_frameAttribsCB);
+        Diligent::StateTransitionDesc Barriers[] = {
+            {m_frameAttribsCB, Diligent::RESOURCE_STATE_UNKNOWN, Diligent::RESOURCE_STATE_CONSTANT_BUFFER, Diligent::STATE_TRANSITION_FLAG_UPDATE_STATE},
+        };
+        m_context->TransitionResourceStates(_countof(Barriers), Barriers);
+
+        m_gltfModelResourceBindings = m_gltfRenderer->CreateResourceBindings(*m_gltfModel, m_frameAttribsCB);
+
+        const Diligent::Uint32 SceneIndex = 0;
+        const Diligent::float4x4 modelTransform = Diligent::float4x4::Scale(0.25f) * Diligent::float4x4::Translation(0.0f, -m_viewHeightM + 1.2f, -0.7f);
+        m_gltfModel->ComputeTransforms(0, m_gltfTransforms, modelTransform);
     }
 
     void PollEvents() {
@@ -881,6 +974,38 @@ private:
         // XR_DOCS_TAG_END_RenderCuboid2
     }
 
+    void RenderGltfModel(const XrVector3f& cameraPos, const XrMatrix4x4f& view, const XrMatrix4x4f& proj, float nearZ, float farZ){
+        {
+            Diligent::MapHelper<Diligent::HLSL::PBRFrameAttribs> FrameAttribs{m_context, m_frameAttribsCB, Diligent::MAP_WRITE, Diligent::MAP_FLAG_DISCARD};
+            memcpy(&FrameAttribs->Camera.mView, view.m, sizeof(XrMatrix4x4f));
+            memcpy(&FrameAttribs->Camera.mProj, proj.m, sizeof(XrMatrix4x4f));
+            memcpy(&FrameAttribs->Camera.mViewProj, cameraConstants.viewProj.m, sizeof(XrMatrix4x4f));
+            FrameAttribs->Camera.f4Position = {cameraPos.x, cameraPos.y, cameraPos.z, 1};
+            FrameAttribs->Camera.fNearPlaneZ = nearZ;
+            FrameAttribs->Camera.fFarPlaneZ = farZ;
+
+            int LightCount = 0;
+            {
+                auto& Renderer = FrameAttribs->Renderer;
+                m_gltfRenderer->SetInternalShaderParameters(Renderer);
+
+                Renderer.OcclusionStrength = 1;
+                Renderer.EmissionScale     = 1;
+                Renderer.AverageLogLum     = 0.3f;
+                Renderer.MiddleGray        = 0.18f;
+                Renderer.WhitePoint        = 3.f;
+                Renderer.IBLScale          = Diligent::float4{1.f};
+                Renderer.PointSize         = 1;
+                Renderer.MipBias           = 0;
+                Renderer.LightCount        = LightCount;
+            }
+        }
+
+        m_gltfRenderer->Begin(m_context);
+        m_gltfRenderInfo.AlphaModes = Diligent::GLTF_PBR_Renderer::RenderInfo::ALPHA_MODE_FLAG_ALL;
+        m_gltfRenderer->Render(m_context, *m_gltfModel, m_gltfTransforms, nullptr, m_gltfRenderInfo, &m_gltfModelResourceBindings);
+    }
+
     void RenderFrame() {
 #if XR_DOCS_CHAPTER_VERSION >= XR_DOCS_CHAPTER_3_2
         // XR_DOCS_TAG_BEGIN_RenderFrame
@@ -1015,20 +1140,26 @@ private:
             RenderCuboid({{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, -m_viewHeightM + 0.9f, -0.7f}}, {1.0f, 0.2f, 1.0f}, {0.6f, 0.6f, 0.4f});
             // XR_DOCS_TAG_END_CallRenderCuboid
 
+            RenderGltfModel(views[i].pose.position, view, proj, nearZ, farZ);
+
             // XR_DOCS_TAG_BEGIN_RenderLayer2
             //
             // Swap chain images must be in COLOR_ATTACHMENT_OPTIMAL/DEPTH_STENCIL_ATTACHMENT_OPTIMAL state
             // when they are released by xrReleaseSwapchainImage.
             // Since they are already in the correct states, no transitions are necessary.
 
-            // Submit the rendering commands to the GPU.
-            m_context->Flush();
-
             // Give the swapchain image back to OpenXR, allowing the compositor to use the image.
             XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
             OPENXR_CHECK(xrReleaseSwapchainImage(colorSwapchainInfo.swapchain, &releaseInfo), "Failed to release Image back to the Color Swapchain");
             OPENXR_CHECK(xrReleaseSwapchainImage(depthSwapchainInfo.swapchain, &releaseInfo), "Failed to release Image back to the Depth Swapchain");
         }
+
+        // Submit the rendering commands to the GPU.
+        m_context->Flush();
+        // Normally, the following operations are performed by the engine when the primiary swap chain is presented.
+        // Since we are rendering to OpenXR swap chains, we need to perform these operations manually.
+        m_context->FinishFrame();
+        m_renderDevice.ReleaseStaleResources();
 
         // Fill out the XrCompositionLayerProjection structure for usage with xrEndFrame().
         renderLayerInfo.layerProjection.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_CORRECT_CHROMATIC_ABERRATION_BIT;
@@ -1186,6 +1317,14 @@ private:
     Diligent::RefCntAutoPtr<Diligent::IPipelineState> m_pipeline;
     // Shader resource binding object encapsulates shader resources required by the pipeline.
     Diligent::RefCntAutoPtr<Diligent::IShaderResourceBinding> m_srb;
+
+
+    std::unique_ptr<Diligent::GLTF_PBR_Renderer> m_gltfRenderer;
+    std::unique_ptr<Diligent::GLTF::Model> m_gltfModel;
+    Diligent::GLTF_PBR_Renderer::ModelResourceBindings m_gltfModelResourceBindings;
+    Diligent::GLTF::ModelTransforms m_gltfTransforms; 
+    Diligent::GLTF_PBR_Renderer::RenderInfo m_gltfRenderInfo;
+    Diligent::RefCntAutoPtr<Diligent::IBuffer> m_frameAttribsCB;
 };
 
 void OpenXRTutorial_Main(Diligent::RENDER_DEVICE_TYPE apiType) {

@@ -209,13 +209,16 @@ else() # Windows / Linux
         VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
     target_sources(${PROJECT_NAME} PRIVATE ${HLSL_SHADERS})
-    target_link_libraries(${PROJECT_NAME}
-        Diligent-GraphicsEngineD3D11-static
-        Diligent-GraphicsEngineD3D12-static
-        Diligent-GraphicsEngineOpenGL-static
-        Diligent-GraphicsEngineVk-static
-        Diligent-Common
-        Diligent-GraphicsTools
-        Diligent-GraphicsAccessories
-    )
-endif() # EOF
+endif()
+
+target_link_libraries(${PROJECT_NAME}
+    Diligent-GraphicsEngineD3D11-static
+    Diligent-GraphicsEngineD3D12-static
+    Diligent-GraphicsEngineOpenGL-static
+    Diligent-GraphicsEngineVk-static
+    Diligent-Common
+    Diligent-GraphicsTools
+    Diligent-GraphicsAccessories
+    DiligentFX
+)
+# EOF

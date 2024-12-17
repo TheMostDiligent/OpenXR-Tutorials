@@ -30,8 +30,18 @@ FetchContent_Declare(
     # https://github.com/DiligentGraphics/DiligentEngine?tab=readme-ov-file#using-fetchcontent
     SOURCE_DIR _deps/DiligentCore
 )
+FetchContent_Declare(
+    DiligentTools
+    GIT_REPOSITORY https://github.com/DiligentGraphics/DiligentTools.git
+    SOURCE_DIR _deps/DiligentTools
+)
+FetchContent_Declare(
+    DiligentFX
+    GIT_REPOSITORY https://github.com/DiligentGraphics/DiligentFX.git
+    SOURCE_DIR _deps/DiligentFX
+)
 set(DILIGENT_USE_OPENXR ON)
-FetchContent_MakeAvailable(DiligentCore)
+FetchContent_MakeAvailable(DiligentCore DiligentTools DiligentFX)
 
 if(XR_TUTORIAL_BUILD_DOCUMENTATION)
     add_subdirectory(tutorial)
