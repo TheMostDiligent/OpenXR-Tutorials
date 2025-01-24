@@ -983,8 +983,16 @@ private:
             FrameAttribs->Camera.f4Position = {cameraPos.x, cameraPos.y, cameraPos.z, 1};
             FrameAttribs->Camera.fNearPlaneZ = nearZ;
             FrameAttribs->Camera.fFarPlaneZ = farZ;
+            FrameAttribs->Camera.fNearPlaneDepth = 0;
+            FrameAttribs->Camera.fFarPlaneDepth = 1;
+
+            FrameAttribs->Camera.fHandness = 1;
+            FrameAttribs->Camera.uiFrameIndex = 0;
 
             int LightCount = 0;
+#ifdef PBR_MAX_LIGHTS
+#    error PBR_MAX_LIGHTS should not be defined here
+#endif
             {
                 auto& Renderer = FrameAttribs->Renderer;
                 m_gltfRenderer->SetInternalShaderParameters(Renderer);
@@ -1001,7 +1009,6 @@ private:
             }
         }
 
-        m_gltfRenderer->Begin(m_context);
         m_gltfRenderInfo.AlphaModes = Diligent::GLTF_PBR_Renderer::RenderInfo::ALPHA_MODE_FLAG_ALL;
         m_gltfRenderer->Render(m_context, *m_gltfModel, m_gltfTransforms, nullptr, m_gltfRenderInfo, &m_gltfModelResourceBindings);
     }
@@ -1063,6 +1070,8 @@ private:
 
         // Resize the layer projection views to match the view count. The layer projection views are used in the layer projection.
         renderLayerInfo.layerProjectionViews.resize(viewCount, {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW});
+
+        m_gltfRenderer->Begin(m_context);
 
         // Per view in the view configuration:
         for (uint32_t i = 0; i < viewCount; i++) {
