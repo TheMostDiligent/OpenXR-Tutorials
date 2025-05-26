@@ -26,7 +26,7 @@ message("Fetching Diligent dependencies...")
 FetchContent_Declare(
     DiligentCore
     GIT_REPOSITORY https://github.com/DiligentGraphics/DiligentCore.git
-    GIT_TAG 4350541c
+    GIT_TAG 9952102d
     # Need to use the DiligentCore directory so that other modules can find it
     # https://github.com/DiligentGraphics/DiligentEngine?tab=readme-ov-file#using-fetchcontent
     SOURCE_DIR _deps/DiligentCore
@@ -34,13 +34,13 @@ FetchContent_Declare(
 FetchContent_Declare(
     DiligentTools
     GIT_REPOSITORY https://github.com/DiligentGraphics/DiligentTools.git
-    GIT_TAG 9ab25fb3
+    GIT_TAG cfa44768
     SOURCE_DIR _deps/DiligentTools
 )
 FetchContent_Declare(
     DiligentFX
     GIT_REPOSITORY https://github.com/DiligentGraphics/DiligentFX.git
-    GIT_TAG f239b1e6
+    GIT_TAG dbf7b60f
     SOURCE_DIR _deps/DiligentFX
 )
 set(DILIGENT_USE_OPENXR ON)
